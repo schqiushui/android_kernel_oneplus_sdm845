@@ -539,8 +539,10 @@ static bool __lim_process_sme_sys_ready_ind(tpAniSirGlobal pMac, uint32_t *pMsgB
 		pe_register_callbacks_with_wma(pMac, ready_req);
 		pMac->lim.add_bssdescr_callback = ready_req->add_bssdescr_cb;
 		pMac->lim.sme_msg_callback = ready_req->sme_msg_cb;
+		pMac->lim.stop_roaming_callback = ready_req->stop_roaming_cb;
 	}
 	pe_debug("sending WMA_SYS_READY_IND msg to HAL");
+	MTRACE(mac_trace_msg_tx(pMac, NO_SESSION, msg.type));
 
 	if (eSIR_SUCCESS != wma_post_ctrl_msg(pMac, &msg)) {
 		pe_err("wma_post_ctrl_msg failed");
@@ -888,7 +890,6 @@ __lim_handle_sme_start_bss_request(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 				session->ch_center_freq_seg1 = 0;
 			}
 		}
-
 		if (session->vhtCapability &&
 				(session->ch_width > CH_WIDTH_80MHZ)) {
 			session->nss = 1;
@@ -1094,6 +1095,10 @@ __lim_handle_sme_start_bss_request(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 
 		session->limPrevSmeState = session->limSmeState;
 		session->limSmeState = eLIM_SME_WT_START_BSS_STATE;
+		MTRACE(mac_trace
+			(mac_ctx, TRACE_CODE_SME_STATE,
+			session->peSessionId,
+			session->limSmeState));
 
 		lim_post_mlm_message(mac_ctx, LIM_MLM_START_REQ,
 			(uint32_t *) mlm_start_req);
@@ -1967,6 +1972,9 @@ __lim_process_sme_join_req(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 
 		session->limPrevSmeState = session->limSmeState;
 		session->limSmeState = eLIM_SME_WT_JOIN_STATE;
+		MTRACE(mac_trace(mac_ctx, TRACE_CODE_SME_STATE,
+				session->peSessionId,
+				session->limSmeState));
 
 		/* Indicate whether spectrum management is enabled */
 		session->spectrumMgtEnabled =
@@ -2297,6 +2305,10 @@ static void __lim_process_sme_reassoc_req(tpAniSirGlobal mac_ctx,
 	session_entry->limPrevSmeState = session_entry->limSmeState;
 	session_entry->limSmeState = eLIM_SME_WT_REASSOC_STATE;
 
+	MTRACE(mac_trace(mac_ctx, TRACE_CODE_SME_STATE,
+				session_entry->peSessionId,
+				session_entry->limSmeState));
+
 	lim_post_mlm_message(mac_ctx,
 			     LIM_MLM_REASSOC_REQ, (uint32_t *)mlm_reassoc_req);
 	return;
@@ -2427,6 +2439,9 @@ static void __lim_process_sme_disassoc_req(tpAniSirGlobal pMac, uint32_t *pMsgBu
 			psessionEntry->limSmeState = eLIM_SME_WT_DISASSOC_STATE;
 			/* Delete all TDLS peers connected before leaving BSS */
 			lim_delete_tdls_peers(pMac, psessionEntry);
+			MTRACE(mac_trace(pMac, TRACE_CODE_SME_STATE,
+				psessionEntry->peSessionId,
+				psessionEntry->limSmeState));
 			break;
 
 		case eLIM_SME_WT_DEAUTH_STATE:
@@ -2436,6 +2451,10 @@ static void __lim_process_sme_disassoc_req(tpAniSirGlobal pMac, uint32_t *pMsgBu
 			 * its been set when PE entered WT_DEAUTH_STATE.
 			 */
 			psessionEntry->limSmeState = eLIM_SME_WT_DISASSOC_STATE;
+			MTRACE(mac_trace
+				       (pMac, TRACE_CODE_SME_STATE,
+				       psessionEntry->peSessionId,
+				       psessionEntry->limSmeState));
 			pe_debug("Rcvd SME_DISASSOC_REQ while in SME_WT_DEAUTH_STATE");
 			break;
 
@@ -2783,6 +2802,9 @@ static void __lim_process_sme_deauth_req(tpAniSirGlobal mac_ctx,
 			session_entry->limPrevSmeState =
 				session_entry->limSmeState;
 			session_entry->limSmeState = eLIM_SME_WT_DEAUTH_STATE;
+			MTRACE(mac_trace(mac_ctx, TRACE_CODE_SME_STATE,
+				       session_entry->peSessionId,
+				       session_entry->limSmeState));
 			/* Send Deauthentication request to MLM below */
 			break;
 		case eLIM_SME_WT_DEAUTH_STATE:
@@ -3352,6 +3374,9 @@ __lim_handle_sme_stop_bss_request(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 	prevState = psessionEntry->limSmeState;
 
 	psessionEntry->limSmeState = eLIM_SME_IDLE_STATE;
+	MTRACE(mac_trace
+		       (pMac, TRACE_CODE_SME_STATE, psessionEntry->peSessionId,
+		       psessionEntry->limSmeState));
 
 	/* Update SME session Id and Transaction Id */
 	psessionEntry->smeSessionId = smesessionId;
@@ -3412,6 +3437,10 @@ __lim_handle_sme_stop_bss_request(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 	if (status != eSIR_SUCCESS) {
 		pe_err("delBss failed for bss %d", psessionEntry->bssIdx);
 		psessionEntry->limSmeState = prevState;
+
+		MTRACE(mac_trace
+			       (pMac, TRACE_CODE_SME_STATE, psessionEntry->peSessionId,
+			       psessionEntry->limSmeState));
 
 		lim_send_sme_rsp(pMac, eWNI_SME_STOP_BSS_RSP,
 				 eSIR_SME_STOP_BSS_FAILURE, smesessionId,
@@ -3736,6 +3765,10 @@ static void __lim_process_sme_addts_req(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 		pe_err("AddtsRsp timer change failed!");
 		goto send_failure_addts_rsp;
 	}
+	MTRACE(mac_trace
+		       (pMac, TRACE_CODE_TIMER_ACTIVATE, psessionEntry->peSessionId,
+		       eLIM_ADDTS_RSP_TIMER));
+
 	/* add the sessionId to the timer object */
 	pMac->lim.limTimers.gLimAddtsRspTimer.sessionId = sessionId;
 	if (tx_timer_activate(&pMac->lim.limTimers.gLimAddtsRspTimer) !=
@@ -3921,6 +3954,7 @@ __lim_process_sme_get_statistics_request(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 	msgQ.reserved = 0;
 	msgQ.bodyptr = pMsgBuf;
 	msgQ.bodyval = 0;
+	MTRACE(mac_trace_msg_tx(pMac, NO_SESSION, msgQ.type));
 
 	if (eSIR_SUCCESS != (wma_post_ctrl_msg(pMac, &msgQ))) {
 		qdf_mem_free(pMsgBuf);
@@ -3950,6 +3984,7 @@ __lim_process_sme_get_tsm_stats_request(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 	msgQ.reserved = 0;
 	msgQ.bodyptr = pMsgBuf;
 	msgQ.bodyval = 0;
+	MTRACE(mac_trace_msg_tx(pMac, NO_SESSION, msgQ.type));
 
 	if (eSIR_SUCCESS != (wma_post_ctrl_msg(pMac, &msgQ))) {
 		qdf_mem_free(pMsgBuf);
@@ -3994,7 +4029,7 @@ __lim_process_sme_update_apwpsi_es(tpAniSirGlobal pMac, uint32_t *pMsgBuf)
 		     sizeof(tSirAPWPSIEs));
 
 	sch_set_fixed_beacon_fields(pMac, psessionEntry);
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_CONFIG_UPDATE);
 
 end:
 	qdf_mem_free(pUpdateAPWPSIEsReq);
@@ -4039,7 +4074,7 @@ static void lim_process_sme_update_config(tpAniSirGlobal mac_ctx,
 
 	if (LIM_IS_AP_ROLE(pe_session)) {
 		sch_set_fixed_beacon_fields(mac_ctx, pe_session);
-		lim_send_beacon_ind(mac_ctx, pe_session);
+		lim_send_beacon_ind(mac_ctx, pe_session, REASON_CONFIG_UPDATE);
 	}
 }
 
@@ -4243,7 +4278,7 @@ static void __lim_process_sme_set_wparsni_es(tpAniSirGlobal pMac, uint32_t *pMsg
 	psessionEntry->privacy = 1;
 
 	sch_set_fixed_beacon_fields(pMac, psessionEntry);
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_CONFIG_UPDATE);
 
 end:
 	qdf_mem_free(pUpdateAPWPARSNIEsReq);
@@ -4372,7 +4407,7 @@ static void __lim_process_sme_set_ht2040_mode(tpAniSirGlobal pMac,
 
 	/* Update beacon */
 	sch_set_fixed_beacon_fields(pMac, psessionEntry);
-	lim_send_beacon_ind(pMac, psessionEntry);
+	lim_send_beacon_ind(pMac, psessionEntry, REASON_SET_HT2040);
 
 	/* update OP Mode for each associated peer */
 	for (staId = 0; staId < psessionEntry->dph.dphHashTable.size; staId++) {
@@ -4493,6 +4528,7 @@ lim_send_set_max_tx_power_req(tpAniSirGlobal pMac, int8_t txPower,
 	msgQ.bodyptr = pMaxTxParams;
 	msgQ.bodyval = 0;
 	pe_debug("Post WMA_SET_MAX_TX_POWER_REQ to WMA");
+	MTRACE(mac_trace_msg_tx(pMac, pSessionEntry->peSessionId, msgQ.type));
 	retCode = wma_post_ctrl_msg(pMac, &msgQ);
 	if (eSIR_SUCCESS != retCode) {
 		pe_err("wma_post_ctrl_msg() failed");
@@ -5412,7 +5448,7 @@ static void lim_process_sme_start_beacon_req(tpAniSirGlobal pMac, uint32_t *pMsg
 			  FL("Start Beacon with ssid %s Ch %d"),
 			  psessionEntry->ssId.ssId,
 			  psessionEntry->currentOperChannel);
-		lim_send_beacon_ind(pMac, psessionEntry);
+		lim_send_beacon_ind(pMac, psessionEntry, REASON_DEFAULT);
 	} else {
 		pe_err("Invalid Beacon Start Indication");
 		return;
@@ -6088,18 +6124,7 @@ static void lim_process_sme_dfs_csa_ie_request(tpAniSirGlobal mac_ctx,
 		dfs_csa_ie_req->ch_params.center_freq_seg0;
 skip_vht:
 	/* Send CSA IE request from here */
-	if (sch_set_fixed_beacon_fields(mac_ctx, session_entry) !=
-			eSIR_SUCCESS) {
-		pe_err("Unable to set CSA IE in beacon");
-		return;
-	}
-
-	/*
-	 * First beacon update request is sent here, the remaining updates are
-	 * done when the FW responds back after sending the first beacon after
-	 * the template update
-	 */
-	lim_send_beacon_ind(mac_ctx, session_entry);
+	lim_send_dfs_chan_sw_ie_update(mac_ctx, session_entry);
 
 	if (dfs_csa_ie_req->ch_params.ch_width == CH_WIDTH_80MHZ)
 		ch_offset = BW80;
@@ -6117,6 +6142,7 @@ skip_vht:
 	lim_send_chan_switch_action_frame(mac_ctx,
 		session_entry->gLimChannelSwitch.primaryChannel,
 		ch_offset, session_entry);
+
 }
 
 /**
@@ -6159,6 +6185,55 @@ static void lim_process_ext_change_channel(tpAniSirGlobal mac_ctx,
 }
 
 /**
+ * lim_nss_update_rsp() - send NSS update response to SME
+ * @mac_ctx Pointer to Global MAC structure
+ * @vdev_id: vdev id
+ * @status: nss update status
+ *
+ * Return: None
+ */
+static void lim_nss_update_rsp(tpAniSirGlobal mac_ctx,
+			       uint8_t vdev_id, QDF_STATUS status)
+{
+	cds_msg_t msg = {0};
+	struct sir_bcn_update_rsp *nss_rsp;
+	QDF_STATUS qdf_status;
+
+	nss_rsp = qdf_mem_malloc(sizeof(*nss_rsp));
+	if (!nss_rsp) {
+		pe_err("AllocateMemory failed for nss_rsp");
+		return;
+	}
+
+	nss_rsp->vdev_id = vdev_id;
+	nss_rsp->status = status;
+	nss_rsp->reason = REASON_NSS_UPDATE;
+
+	msg.type = eWNI_SME_NSS_UPDATE_RSP;
+	msg.bodyptr = nss_rsp;
+	msg.bodyval = 0;
+	qdf_status = cds_mq_post_message(QDF_MODULE_ID_SME, &msg);
+	if (QDF_IS_STATUS_ERROR(qdf_status)) {
+		pe_err("Failed to post eWNI_SME_NSS_UPDATE_RSP");
+		qdf_mem_free(nss_rsp);
+	}
+}
+
+void lim_send_bcn_rsp(tpAniSirGlobal mac_ctx, tpSendbeaconParams rsp)
+{
+	if (!rsp) {
+		pe_err("rsp is NULL");
+		return;
+	}
+
+	pe_debug("Send beacon resp status %d for reason %d",
+		 rsp->status, rsp->reason);
+
+	if (rsp->reason == REASON_NSS_UPDATE)
+		lim_nss_update_rsp(mac_ctx, rsp->vdev_id, rsp->status);
+}
+
+/**
  * lim_process_nss_update_request() - process sme nss update req
  *
  * @mac_ctx: Pointer to Global MAC structure
@@ -6174,25 +6249,28 @@ static void lim_process_nss_update_request(tpAniSirGlobal mac_ctx,
 {
 	struct sir_nss_update_request *nss_update_req_ptr;
 	tpPESession session_entry = NULL;
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	uint8_t vdev_id;
 
-	if (msg_buf == NULL) {
+	if (!msg_buf) {
 		pe_err("Buffer is Pointing to NULL");
 		return;
 	}
 
 	nss_update_req_ptr = (struct sir_nss_update_request *)msg_buf;
+	vdev_id = nss_update_req_ptr->vdev_id;
 	session_entry = pe_find_session_by_sme_session_id(mac_ctx,
 				nss_update_req_ptr->vdev_id);
-	if (session_entry == NULL) {
+	if (!session_entry) {
 		pe_err("Session not found for given session_id %d",
 			nss_update_req_ptr->vdev_id);
-		return;
+		goto end;
 	}
 
 	if (session_entry->valid && !LIM_IS_AP_ROLE(session_entry)) {
 		pe_err("Invalid SystemRole %d",
 			GET_LIM_SYSTEM_ROLE(session_entry));
-		return;
+		goto end;
 	}
 
 	/* populate nss field in the beacon */
@@ -6204,16 +6282,28 @@ static void lim_process_nss_update_request(tpAniSirGlobal mac_ctx,
 			(session_entry->ch_width > CH_WIDTH_80MHZ))
 		session_entry->gLimOperatingMode.chanWidth = CH_WIDTH_80MHZ;
 
-	pe_debug("ch width %hu", session_entry->gLimOperatingMode.chanWidth);
+	pe_debug("ch width %d Rx NSS %d",
+		 session_entry->gLimOperatingMode.chanWidth,
+		 session_entry->gLimOperatingMode.rxNSS);
 
 	/* Send nss update request from here */
 	if (sch_set_fixed_beacon_fields(mac_ctx, session_entry) !=
-			eSIR_SUCCESS) {
+		eSIR_SUCCESS) {
 		pe_err("Unable to set op mode IE in beacon");
-		return;
+		goto end;
 	}
 
-	lim_send_beacon_ind(mac_ctx, session_entry);
+	status = lim_send_beacon_ind(mac_ctx, session_entry, REASON_NSS_UPDATE);
+	if (QDF_IS_STATUS_SUCCESS(status))
+		return;
+
+	pe_err("Unable to send beacon");
+end:
+	/*
+	 * send resp only in case of failure,
+	 * success case response will be from wma.
+	 */
+	lim_nss_update_rsp(mac_ctx, vdev_id, status);
 }
 
 /**

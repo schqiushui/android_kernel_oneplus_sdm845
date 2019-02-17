@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1277,7 +1277,7 @@ void lim_ibss_add_bss_rsp_when_coalescing(tpAniSirGlobal pMac, void *msg,
 					  infoLen, pSessionEntry->smeSessionId);
 	{
 		/* Configure beacon and send beacons to HAL */
-		lim_send_beacon_ind(pMac, pSessionEntry);
+		lim_send_beacon_ind(pMac, pSessionEntry, REASON_DEFAULT);
 	}
 
 end:
@@ -1336,6 +1336,10 @@ void lim_ibss_del_bss_rsp(tpAniSirGlobal pMac, void *msg, tpPESession psessionEn
 	lim_delete_pre_auth_list(pMac);
 
 	psessionEntry->limMlmState = eLIM_MLM_IDLE_STATE;
+
+	MTRACE(mac_trace
+		       (pMac, TRACE_CODE_MLM_STATE, psessionEntry->peSessionId,
+		       psessionEntry->limMlmState));
 
 	psessionEntry->limSystemRole = eLIM_STA_ROLE;
 

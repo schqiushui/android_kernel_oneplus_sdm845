@@ -46,6 +46,7 @@
 #include "lim_ibss_peer_mgmt.h"
 #include "lim_admit_control.h"
 #include "lim_send_sme_rsp_messages.h"
+#include "lim_security_utils.h"
 #include "wmm_apsd.h"
 #include "lim_trace.h"
 #include "lim_ft_defs.h"
@@ -61,8 +62,6 @@
 #include "sys_startup.h"
 #include "cds_concurrency.h"
 #include "nan_datapath.h"
-
-#define NO_SESSION 0xFF
 
 static void __lim_init_scan_vars(tpAniSirGlobal pMac)
 {
@@ -165,6 +164,8 @@ static void __lim_init_states(tpAniSirGlobal pMac)
 	pMac->lim.gLimPrevSmeState = eLIM_SME_OFFLINE_STATE;
 
 	/* / MLM State visible across all Sirius modules */
+	MTRACE(mac_trace
+		       (pMac, TRACE_CODE_MLM_STATE, NO_SESSION, eLIM_MLM_IDLE_STATE));
 	pMac->lim.gLimMlmState = eLIM_MLM_IDLE_STATE;
 
 	/* / Previous MLM State */
@@ -472,6 +473,10 @@ tSirRetStatus lim_start(tpAniSirGlobal pMac)
 
 	if (pMac->lim.gLimSmeState == eLIM_SME_OFFLINE_STATE) {
 		pMac->lim.gLimSmeState = eLIM_SME_IDLE_STATE;
+
+		MTRACE(mac_trace
+			       (pMac, TRACE_CODE_SME_STATE, NO_SESSION,
+			       pMac->lim.gLimSmeState));
 
 		/* By default do not return after first scan match */
 		pMac->lim.gLimReturnAfterFirstMatch = 0;
@@ -886,6 +891,7 @@ tSirRetStatus pe_start(tpAniSirGlobal pMac)
 void pe_stop(tpAniSirGlobal pMac)
 {
 	lim_cleanup(pMac);
+	pe_debug(" PE STOP: Set LIM state to eLIM_MLM_OFFLINE_STATE");
 	SET_LIM_MLM_STATE(pMac, eLIM_MLM_OFFLINE_STATE);
 	return;
 }
@@ -894,6 +900,7 @@ static void pe_free_nested_messages(tSirMsgQ *msg)
 {
 	switch (msg->type) {
 	case WMA_SET_LINK_STATE_RSP:
+		pe_debug("pe_free_nested_messages: WMA_SET_LINK_STATE_RSP");
 		qdf_mem_free(((tpLinkStateParams) msg->bodyptr)->callbackArg);
 		break;
 	default:
@@ -1526,8 +1533,6 @@ lim_detect_change_in_ap_capabilities(tpAniSirGlobal pMac,
 	       SIR_MAC_GET_ESS(psessionEntry->limCurrentBssCaps)) ||
 	      (SIR_MAC_GET_PRIVACY(apNewCaps.capabilityInfo) !=
 	       SIR_MAC_GET_PRIVACY(psessionEntry->limCurrentBssCaps)) ||
-	      (SIR_MAC_GET_SHORT_PREAMBLE(apNewCaps.capabilityInfo) !=
-	       SIR_MAC_GET_SHORT_PREAMBLE(psessionEntry->limCurrentBssCaps)) ||
 	      (SIR_MAC_GET_QOS(apNewCaps.capabilityInfo) !=
 	       SIR_MAC_GET_QOS(psessionEntry->limCurrentBssCaps)) ||
 	      ((newChannel != psessionEntry->currentOperChannel) &&
@@ -2327,6 +2332,8 @@ tMgmtFrmDropReason lim_is_pkt_candidate_for_drop(tpAniSirGlobal pMac,
 	if ((subType == SIR_MAC_MGMT_BEACON) ||
 	    (subType == SIR_MAC_MGMT_PROBE_RSP)) {
 		if (lim_is_beacon_miss_scenario(pMac, pRxPacketInfo)) {
+			MTRACE(mac_trace(pMac, TRACE_CODE_INFO_LOG, 0,
+					 eLOG_NODROP_MISSED_BEACON_SCENARIO));
 			return eMGMT_DROP_NO_DROP;
 		}
 		if (lim_is_system_in_scan_state(pMac))
@@ -2367,6 +2374,25 @@ tMgmtFrmDropReason lim_is_pkt_candidate_for_drop(tpAniSirGlobal pMac,
 		/* Drop the Probe Request in IBSS mode, if STA did not send out the last beacon */
 		/* In IBSS, the node which sends out the beacon, is supposed to respond to ProbeReq */
 		return eMGMT_DROP_NOT_LAST_IBSS_BCN;
+	} else if (subType == SIR_MAC_MGMT_AUTH) {
+		uint16_t curr_seq_num = 0;
+		struct tLimPreAuthNode *auth_node;
+
+		pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
+		psessionEntry = pe_find_session_by_bssid(pMac, pHdr->bssId,
+							 &sessionId);
+		if (!psessionEntry)
+			return eMGMT_DROP_NO_DROP;
+
+		curr_seq_num = ((pHdr->seqControl.seqNumHi << 4) |
+				(pHdr->seqControl.seqNumLo));
+		auth_node = lim_search_pre_auth_list(pMac, pHdr->sa);
+		if (auth_node && pHdr->fc.retry &&
+		    (auth_node->seq_num == curr_seq_num)) {
+			pe_err("auth frame, seq num: %d is already processed, drop it",
+				  curr_seq_num);
+			return eMGMT_DROP_DUPLICATE_AUTH_FRAME;
+		}
 	}
 
 	return eMGMT_DROP_NO_DROP;
