@@ -798,7 +798,7 @@ void htt_rx_detach(struct htt_pdev_t *pdev)
 							   memctx));
 
 	qdf_mem_free_consistent(pdev->osdev, pdev->osdev->dev,
-				   pdev->rx_ring.size * sizeof(qdf_dma_addr_t),
+				   pdev->rx_ring.size * sizeof(target_paddr_t),
 				   pdev->rx_ring.buf.paddrs_ring,
 				   pdev->rx_ring.base_paddr,
 				   qdf_get_dma_mem_context((&pdev->rx_ring.buf),
@@ -2163,6 +2163,9 @@ static int htt_rx_mon_amsdu_rx_in_order_pop_ll(htt_pdev_handle pdev,
 	uint32_t len;
 	uint32_t last_frag;
 	qdf_dma_addr_t paddr;
+	static uint8_t preamble_type;
+	static uint32_t vht_sig_a_1;
+	static uint32_t vht_sig_a_2;
 
 	HTT_ASSERT1(htt_rx_in_order_ring_elems(pdev) != 0);
 
@@ -2237,6 +2240,33 @@ static int htt_rx_mon_amsdu_rx_in_order_pop_ll(htt_pdev_handle pdev,
 		prev = msdu;
 
 		HTT_PKT_DUMP(htt_print_rx_desc(rx_desc));
+
+		/*
+		 * Only the first mpdu has valid preamble type, so use it
+		 * till the last mpdu is reached
+		 */
+		if (rx_desc->attention.first_mpdu) {
+			preamble_type = rx_desc->ppdu_start.preamble_type;
+			if (preamble_type == 8 || preamble_type == 9 ||
+			   preamble_type == 0x0c || preamble_type == 0x0d) {
+				vht_sig_a_1 = VHT_SIG_A_1(rx_desc);
+				vht_sig_a_2 = VHT_SIG_A_2(rx_desc);
+			}
+		} else {
+			rx_desc->ppdu_start.preamble_type = preamble_type;
+			if (preamble_type == 8 || preamble_type == 9 ||
+			   preamble_type == 0x0c || preamble_type == 0x0d) {
+				VHT_SIG_A_1(rx_desc) = vht_sig_a_1;
+				VHT_SIG_A_2(rx_desc) = vht_sig_a_2;
+			}
+		}
+
+		if (rx_desc->attention.last_mpdu) {
+			preamble_type = 0;
+			vht_sig_a_1 = 0;
+			vht_sig_a_2 = 0;
+		}
+
 		/*
 		 * Make the netbuf's data pointer point to the payload rather
 		 * than the descriptor.
@@ -3525,10 +3555,7 @@ qdf_nbuf_t htt_rx_hash_list_lookup(struct htt_pdev_t *pdev,
 	if (netbuf == NULL) {
 		qdf_print("rx hash: %s: no entry found for %pK!\n",
 			  __func__, (void *)paddr);
-		if (cds_is_self_recovery_enabled())
-			cds_trigger_recovery(CDS_RX_HASH_NO_ENTRY_FOUND);
-		else
-			HTT_ASSERT_ALWAYS(0);
+		cds_trigger_recovery(CDS_RX_HASH_NO_ENTRY_FOUND);
 	}
 
 	return netbuf;

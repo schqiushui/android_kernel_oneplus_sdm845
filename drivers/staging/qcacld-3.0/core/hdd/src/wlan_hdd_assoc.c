@@ -53,6 +53,7 @@
 #include "wlan_hdd_napi.h"
 #include <wlan_logging_sock_svc.h>
 #include "wlan_hdd_tsf.h"
+#include "wlan_hdd_scan.h"
 
 /* These are needed to recognize WPA and RSN suite types */
 #define HDD_WPA_OUI_SIZE 4
@@ -131,7 +132,6 @@ uint8_t ccp_rsn_oui_90[HDD_RSN_OUI_SIZE] = {0x00, 0x0F, 0xAC, 0x09};
 #define FT_ASSOC_RSP_IES_OFFSET 6  /* Capability(2) + AID(2) + Status Code(2) */
 #define FT_ASSOC_REQ_IES_OFFSET 4  /* Capability(2) + LI(2) */
 
-#define BEACON_FRAME_IES_OFFSET 12
 #define HDD_PEER_AUTHORIZE_WAIT 10
 
 /**
@@ -1344,6 +1344,11 @@ static void hdd_send_association_event(struct net_device *dev,
 	hdd_wext_state_t *pWextState = WLAN_HDD_GET_WEXT_STATE_PTR(pAdapter);
 	tCsrRoamProfile *pRoamProfile = &(pWextState->roamProfile);
 
+	if (!pHddCtx) {
+		hdd_err("HDD context is NULL");
+		return;
+	}
+
 	memset(&wrqu, '\0', sizeof(wrqu));
 	wrqu.ap_addr.sa_family = ARPHRD_ETHER;
 	we_event = SIOCGIWAP;
@@ -1820,6 +1825,7 @@ static QDF_STATUS hdd_dis_connect_handler(hdd_adapter_t *pAdapter,
 	    pHddStaCtx->conn_info.connState)) {
 		hdd_conn_set_connection_state(pAdapter,
 					      eConnectionState_NotConnected);
+		hdd_set_roaming_in_progress(false);
 	}
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
 	if ((QDF_STA_MODE == pAdapter->device_mode) ||
@@ -2605,6 +2611,12 @@ static QDF_STATUS hdd_association_completion_handler(hdd_adapter_t *pAdapter,
 		hdd_err("config is NULL");
 		return QDF_STATUS_E_NULL_VALUE;
 	}
+
+	/*
+	 * reset scan reject params if connection is success or we received
+	 * final failure from CSR after trying with all APs.
+	 */
+	hdd_reset_scan_reject_params(pHddCtx, roamStatus, roamResult);
 
 	/*
 	 * Enable roaming on other STA iface except this one.
@@ -4085,6 +4097,12 @@ hdd_roam_tdls_status_update_handler(hdd_adapter_t *pAdapter,
 				status = QDF_STATUS_E_FAILURE;
 				hdd_debug("no available slot in conn_info. staId: %d cannot be stored",
 					pRoamInfo->staId);
+				sme_delete_tdls_peer_sta(WLAN_HDD_GET_HAL_CTX
+							 (pAdapter),
+							 pAdapter->sessionId,
+							 pRoamInfo->
+							 peerMac.bytes);
+
 			}
 			pAdapter->tdlsAddStaStatus = status;
 		}
@@ -4267,7 +4285,8 @@ hdd_roam_tdls_status_update_handler(hdd_adapter_t *pAdapter,
 					     tdlsConnInfo[staIdx].
 					     peerMac,
 					     QDF_MAC_ADDR_SIZE);
-				pHddCtx->tdlsConnInfo[staIdx].staId = 0;
+				pHddCtx->tdlsConnInfo[staIdx].staId =
+						HDD_WLAN_INVALID_STA_ID;
 				pHddCtx->tdlsConnInfo[staIdx].
 				sessionId = 255;
 
@@ -5002,6 +5021,12 @@ static void hdd_roam_channel_switch_handler(hdd_adapter_t *adapter,
 
 	hdd_debug("channel switch for session:%d to channel:%d",
 		adapter->sessionId, roam_info->chan_info.chan_id);
+
+	/* Enable Roaming on the interface which was disabled before CSA */
+	if (adapter->device_mode == QDF_STA_MODE)
+		sme_start_roaming(WLAN_HDD_GET_HAL_CTX(adapter),
+				  adapter->sessionId,
+				  REASON_DRIVER_ENABLED);
 
 	chan_change.chan = roam_info->chan_info.chan_id;
 	chan_change.chan_params.ch_width =
@@ -5992,6 +6017,7 @@ int hdd_set_csr_auth_type(hdd_adapter_t *pAdapter, eCsrAuthType RSNAuthType)
 
 	switch (pHddStaCtx->conn_info.authType) {
 	case eCSR_AUTH_TYPE_OPEN_SYSTEM:
+	case eCSR_AUTH_TYPE_AUTOSWITCH:
 #ifdef FEATURE_WLAN_ESE
 	case eCSR_AUTH_TYPE_CCKM_WPA:
 	case eCSR_AUTH_TYPE_CCKM_RSN:

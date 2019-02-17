@@ -2350,6 +2350,23 @@ static int32_t _csr_calculate_bss_score(tpAniSirGlobal mac_ctx,
 
 	return score;
 }
+static uint8_t csr_sta_get_supported_nss(tpAniSirGlobal mac_ctx,
+					   tSirBssDescription *bss_info)
+{
+	uint8_t supported_nss = 1;
+
+	if (wma_is_hw_dbs_capable() &&
+	    cds_is_dbs_req_for_channel(bss_info->channelId))
+		return supported_nss;
+
+	if (mac_ctx->vdev_type_nss_2g.sta &&
+	    CDS_IS_CHANNEL_24GHZ(bss_info->channelId))
+		supported_nss = mac_ctx->vdev_type_nss_2g.sta;
+	else if (mac_ctx->vdev_type_nss_5g.sta &&
+		 CDS_IS_CHANNEL_5GHZ(bss_info->channelId))
+		supported_nss = mac_ctx->vdev_type_nss_5g.sta;
+	return supported_nss;
+}
 /**
  * csr_calculate_bss_score() - Calculate candidate AP score for Best
  * candidate selection for connection
@@ -2371,13 +2388,16 @@ static void csr_calculate_bss_score(tpAniSirGlobal pMac,
 	tSirBssDescription *bss_info = &(pBss->Result.BssDescriptor);
 
 	channel_id = cds_get_channel_enum(pBss->Result.BssDescriptor.channelId);
-	if (pMac->roam.configParam.enable2x2)
-		nss = 2;
-
-	if (channel_id < NUM_CHANNELS)
+	if (channel_id < NUM_CHANNELS) {
+		nss = csr_sta_get_supported_nss(pMac, bss_info);
+		if (!nss) {
+			sme_err("scoring failed for BSSID:- "MAC_ADDRESS_STR"",
+				MAC_ADDR_ARRAY(bss_info->bssId));
+			return;
+		}
 		score = _csr_calculate_bss_score(pMac, bss_info,
-			pcl_chan_weight, nss);
-
+				pcl_chan_weight, nss);
+	}
 	pBss->bss_score = score;
 	return;
 }
@@ -3822,6 +3842,10 @@ static struct tag_csrscan_result *csr_scan_save_bss_description(tpAniSirGlobal
 	/* figure out how big the BSS description is (the BSSDesc->length does
 	 * NOT include the size of the length field itself).
 	 */
+	if (CSR_SCAN_IS_OVER_BSS_LIMIT(pMac)) {
+		sme_debug("BSS Limit reached");
+		return NULL;
+	}
 	cbBSSDesc = pBSSDescription->length + sizeof(pBSSDescription->length);
 
 	cbAllocated = sizeof(struct tag_csrscan_result) + cbBSSDesc;
@@ -3837,10 +3861,7 @@ static struct tag_csrscan_result *csr_scan_save_bss_description(tpAniSirGlobal
 				       bssId));
 		qdf_mem_copy(&pCsrBssDescription->Result.BssDescriptor,
 			     pBSSDescription, cbBSSDesc);
-		if (NULL != pCsrBssDescription->Result.pvIes) {
-			QDF_ASSERT(pCsrBssDescription->Result.pvIes == NULL);
-			return NULL;
-		}
+
 		csr_scan_add_result(pMac, pCsrBssDescription, pIes, sessionId);
 	}
 
