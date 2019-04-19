@@ -119,4 +119,8 @@ all.config
 # fetched Android config fragments
 kernel/configs/android-*.cfg
 
-drivers/oneplus
+# Kernel compilation output directory
+out/
+
+# Wireguard
+net/wireguard/
