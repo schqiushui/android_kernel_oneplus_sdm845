@@ -87,6 +87,7 @@ typedef PREPACK struct {
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 3, 0))
 /* TODO Cleanup this backported function */
+#if 0
 static int qcacld_bp_seq_printf(struct seq_file *m, const char *f, ...)
 {
 	va_list args;
@@ -97,6 +98,7 @@ static int qcacld_bp_seq_printf(struct seq_file *m, const char *f, ...)
 
 	return m->count;
 }
+#endif
 
 #define seq_printf(m, fmt, ...) qcacld_bp_seq_printf((m), fmt, ##__VA_ARGS__)
 #endif
