@@ -3226,7 +3226,6 @@ static const struct file_operations proc_pid_memplus_type_operations = {
 };
 #endif
 
-
 #include <linux/random.h>
 static int va_feature = 0x7;
 module_param(va_feature, int, 0644);
